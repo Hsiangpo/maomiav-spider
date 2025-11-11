@@ -24,7 +24,7 @@ from __future__ import annotations
 
 
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 
@@ -66,6 +66,11 @@ INDEX_HTML = """
     }
     header h1 { margin: 0 0 8px; font-size: 32px; font-weight: 600; }
     header p { margin: 4px 0 0; opacity: 0.9; }
+    .site-link { margin-top: 6px; }
+    .site-link a {
+      color: #ffe3ff;
+      text-decoration: underline;
+    }
     main { padding: 32px; max-width: 1200px; margin: 0 auto; }
     .panel {
       background: #fff;
@@ -166,6 +171,7 @@ INDEX_HTML = """
   <header>
     <h1>猫咪 VIP 采集演示</h1>
     <p>仅用于协议分析 / 逆向学习，不内置账号密码，不提供下载链路。</p>
+    <p class="site-link">站点：<a href="https://www.maomiav.com/" target="_blank" rel="noopener noreferrer">www.maomiav.com</a></p>
   </header>
   <main>
     <section class="panel">
@@ -240,10 +246,10 @@ INDEX_HTML = """
       pre.textContent = lines.join('\\n') + '\\n\\n' + pre.textContent;
     }
 
-    function collectCredentialPayload() {
+    function collectCredentialPayload(required = true) {
       const username = document.getElementById('username').value.trim();
       const password = document.getElementById('password').value.trim();
-      if (!username || !password) {
+      if (required && (!username || !password)) {
         alert('请输入账号和密码');
         throw new Error('missing credential');
       }
@@ -251,13 +257,8 @@ INDEX_HTML = """
     }
 
     async function loadCategories() {
-      let payload;
-      try {
-        payload = collectCredentialPayload();
-      } catch (error) {
-        return;
-      }
-      logStatus('开始加载分类...', null);
+      const payload = collectCredentialPayload(false);
+      logStatus(payload.username && payload.password ? '开始加载分类...' : '匿名加载分类...', null);
       try {
         const res = await fetch('/api/categories', {
           method: 'POST',
@@ -296,17 +297,12 @@ INDEX_HTML = """
     }
 
     async function startFetch() {
-      let credentials;
-      try {
-        credentials = collectCredentialPayload();
-      } catch (error) {
-        return;
-      }
+      const credentials = collectCredentialPayload(false);
       const category = resolveCategorySelection();
       if (!category) return;
       const pages = Number(document.getElementById('pages').value) || 1;
-      if (pages < 1 || pages > 5) {
-        alert('页数建议在 1-5 之间');
+      if (pages < 1) {
+        alert('页数至少为 1');
         return;
       }
       const identifier = category.jump_name || category.slug || category.name;
@@ -315,7 +311,8 @@ INDEX_HTML = """
         category: identifier,
         pages,
       };
-      logStatus('开始采集...', { category: category.name, pages });
+      const logLabel = credentials.username && credentials.password ? '开始采集...' : '匿名采集...';
+      logStatus(logLabel, { category: category.name, pages });
       try {
         const res = await fetch('/api/scrape', {
           method: 'POST',
@@ -444,15 +441,8 @@ INDEX_HTML = """
 
 
 def create_client(data: Dict[str, Any]) -> MaomiClient:
-
     username = (data.get("username") or "").strip()
-
     password = (data.get("password") or "").strip()
-
-    if not username or not password:
-
-        raise ValueError("必须提供用户名和密码")
-
     return MaomiClient(username, password)
 
 
@@ -479,9 +469,21 @@ def api_categories():
 
     try:
 
-        client = create_client(request.json or {})
+        payload = request.json or {}
 
-        client.login()
+        username = (payload.get("username") or "").strip()
+
+        password = (payload.get("password") or "").strip()
+
+        if username and password:
+
+            client = MaomiClient(username, password)
+
+            client.login()
+
+        else:
+
+            client = MaomiClient("", "")
 
         categories = client.fetch_categories()
 
@@ -538,9 +540,17 @@ def api_scrape():
 
 
 
-        client = create_client(payload)
+        username = (payload.get("username") or "").strip()
 
-        login_res = client.login()
+        password = (payload.get("password") or "").strip()
+
+        client = MaomiClient(username, password)
+
+        login_res: Optional[LoginResult] = None
+
+        if username and password:
+
+            login_res = client.login()
 
         categories = client.fetch_categories()
 
@@ -560,15 +570,27 @@ def api_scrape():
 
         videos, topic_meta = client.fetch_videos_for_category(target, pages)
 
+        account_data = (
+
+            {
+
+                "vip_level": login_res.raw.get("vip_level"),
+
+                "is_vip": login_res.raw.get("is_vip"),
+
+            }
+
+            if login_res
+
+            else {"vip_level": None, "is_vip": None}
+
+        )
+
         return jsonify(
 
-            {                "account": {
+            {
 
-                    "vip_level": login_res.raw.get("vip_level"),
-
-                    "is_vip": login_res.raw.get("is_vip"),
-
-                },
+                "account": account_data,
 
                 "category": {
 
@@ -617,23 +639,3 @@ def run(host: str = "0.0.0.0", port: int = 5000) -> None:
 if __name__ == "__main__":
 
     run()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
