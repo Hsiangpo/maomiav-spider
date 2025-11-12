@@ -1,47 +1,18 @@
 #!/usr/bin/env python3
-
 # -*- coding: utf-8 -*-
-
 """
-
 Web 前端：在浏览器中登录、选择分类/页数、查看封面并下载所选视频。
-
-
-
 运行：
-
     pip install flask requests pycryptodome
-
     python web_app.py
-
 然后访问 http://127.0.0.1:5000/
-
 """
-
-
-
 from __future__ import annotations
-
-
-
 from typing import Any, Dict, List, Optional
-
-
-
 from flask import Flask, jsonify, render_template_string, request
-
-
-
-from maomi_spider import MaomiClient, SUPPORTED_CHANNELS
-
-
+from maomi_spider import MaomiClient, SUPPORTED_CHANNELS, LoginResult
 
 app = Flask(__name__)
-
-
-
-
-
 
 INDEX_HTML = """
 <!DOCTYPE html>
@@ -431,211 +402,95 @@ INDEX_HTML = """
   </script>
 </body>
 </html>
-
 """
-
-
-
-
-
-
 
 def create_client(data: Dict[str, Any]) -> MaomiClient:
     username = (data.get("username") or "").strip()
     password = (data.get("password") or "").strip()
     return MaomiClient(username, password)
 
-
-
-
-
-
-
 @app.get("/")
-
 def index() -> str:
-
     return render_template_string(INDEX_HTML)
 
-
-
-
-
-
-
 @app.post("/api/categories")
-
 def api_categories():
-
     try:
-
         payload = request.json or {}
-
         username = (payload.get("username") or "").strip()
-
         password = (payload.get("password") or "").strip()
-
         if username and password:
-
             client = MaomiClient(username, password)
-
             client.login()
-
         else:
-
             client = MaomiClient("", "")
-
         categories = client.fetch_categories()
-
         data = [
-
             {
-
                 "section": cat.section,
-
                 "name": cat.name,
-
                 "jump_name": cat.slug,
-
                 "channel": cat.channel,
-
                 "topic_id": cat.topic_id,
-
                 "supported": cat.channel in SUPPORTED_CHANNELS or cat.channel == "topic",
-
             }
-
             for cat in categories
-
         ]
-
         return jsonify(data)
-
     except Exception as exc:  # noqa: BLE001
-
         return jsonify({"message": str(exc)}), 400
-
-
-
-
-
-
 
 @app.post("/api/scrape")
-
 def api_scrape():
-
     try:
-
         payload = request.json or {}
-
         pages = max(1, int(payload.get("pages") or 1))
-
         category = (payload.get("category") or "").strip()
-
         if not category:
-
             raise ValueError("category 不能为空")
-
-
-
-
         username = (payload.get("username") or "").strip()
-
         password = (payload.get("password") or "").strip()
-
         client = MaomiClient(username, password)
-
         login_res: Optional[LoginResult] = None
-
         if username and password:
-
             login_res = client.login()
-
         categories = client.fetch_categories()
-
         identifier = category.lower()
-
         matches = [
-
             cat for cat in categories if cat.slug.lower() == identifier or cat.name.lower() == identifier
-
         ]
-
         if not matches:
-
             raise ValueError(f"未找到分类：{category}")
-
         target = matches[0]
-
         videos, topic_meta = client.fetch_videos_for_category(target, pages)
-
         account_data = (
-
             {
-
                 "vip_level": login_res.raw.get("vip_level"),
-
                 "is_vip": login_res.raw.get("is_vip"),
-
             }
-
             if login_res
-
             else {"vip_level": None, "is_vip": None}
-
         )
-
         return jsonify(
-
             {
-
                 "account": account_data,
-
                 "category": {
-
                     "section": target.section,
-
                     "name": target.name,
-
                     "jump_name": target.slug,
-
                     "channel": target.channel,
-
                     "pages_requested": pages,
-
                     "videos_found": len(videos),
-
                     "topic_meta": topic_meta,
-
                 },
-
                 "videos": videos,
-
             }
-
         )
-
     except Exception as exc:  # noqa: BLE001
-
         return jsonify({"message": str(exc)}), 400
 
-
-
-
-
-
-
 def run(host: str = "0.0.0.0", port: int = 5000) -> None:
-
     app.run(host=host, port=port, debug=False)
 
-
-
-
-
-
-
 if __name__ == "__main__":
-
     run()
